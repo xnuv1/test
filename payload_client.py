@@ -9,7 +9,6 @@ import requests
 
 
 # URL of your FastAPI service.
-# If the FastAPI/Docker is running on the SAME Windows machine:
 API_URL = "http://localhost:8000/predict_payload"
 
 
@@ -33,9 +32,6 @@ def compute_hist_entropy(byte_data: bytes) -> Tuple[np.ndarray, np.ndarray]:
     This is a generic implementation that gives you:
       - hist[0..255]   : frequency of each byte value (0-255), normalized
       - ent[0..255]    : Shannon entropy of 256 equally-sized segments
-
-    You SHOULD adapt this to match exactly the feature extraction
-    you used when building your training dataset.
     """
     if not byte_data:
         # Edge case: empty file
@@ -70,7 +66,7 @@ def compute_hist_entropy(byte_data: bytes) -> Tuple[np.ndarray, np.ndarray]:
         segment = arr[start:end]
         ent[i] = shannon_entropy(segment)
 
-    # Optionally normalize entropies (0..8 for bytes)
+    #
     ent = ent / 8.0
 
     return hist, ent
@@ -87,6 +83,55 @@ def build_feature_dict(hist: np.ndarray, ent: np.ndarray) -> Dict[str, float]:
 
 
 # ---------- Main client logic ----------
+
+def analyze_file(file_path: str):
+    if not os.path.exists(file_path):
+        print(f"[ERROR] File does not exist: {file_path}")
+        return
+
+    print(f"[INFO] Reading file: {file_path}")
+    with open(file_path, "rb") as f:
+        data = f.read()
+
+    print(f"[INFO] Computing hash and features...")
+    file_hash = sha256_file(file_path)
+    hist, ent = compute_hist_entropy(data)
+    features = build_feature_dict(hist, ent)
+
+    payload = {
+        "file_hash": file_hash,
+        "file_path": file_path,
+        "features": features,
+    }
+
+    try:
+        print(f"[INFO] Sending features to API: {API_URL}")
+        resp = requests.post(API_URL, json=payload, timeout=5)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"[ERROR] Request to API failed: {e}")
+        return
+
+    try:
+        result = resp.json()
+    except Exception as e:
+        print(f"[ERROR] Could not decode JSON response: {e}")
+        print(resp.text)
+        return
+
+    print("[INFO] API response:")
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python payload_client.py <path_to_file>")
+        sys.exit(1)
+
+    file_path_arg = sys.argv[1]
+    analyze_file(file_path_arg)
+
+
 
 def analyze_file(file_path: str):
     if not os.path.exists(file_path):
